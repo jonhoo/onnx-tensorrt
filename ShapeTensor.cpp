@@ -464,7 +464,7 @@ ShapeTensor convertTo0D(ImporterContext* ctx, const ShapeTensor& tensor)
 //!
 //! The string that should describe the context of the dimensions,
 //! e.g. "reshape" or "fill output".
-static nvinfer1::Dims toDims(const ShapeTensor& x, const char* what, int32_t minAllowed, int32_t maxAllowed)
+nvinfer1::Dims shapeTensorToDims(const ShapeTensor& x, const char* what, int32_t minAllowed, int32_t maxAllowed)
 {
     nvinfer1::Dims d{-1, {}};
     if (x.sizeKnown())
@@ -524,7 +524,8 @@ nvinfer1::IShuffleLayer* addShuffle(
     nvinfer1::IShuffleLayer* shuffle = N_CHECK(ctx->network()->addShuffle(data));
     if (reshapeDims.allValuesKnown())
     {
-        shuffle->setReshapeDimensions(toDims(reshapeDims, "reshape", -1, std::numeric_limits<int32_t>::max()));
+        shuffle->setReshapeDimensions(
+            shapeTensorToDims(reshapeDims, "reshape", -1, std::numeric_limits<int32_t>::max()));
     }
     else
     {
@@ -540,8 +541,9 @@ nvinfer1::ISliceLayer* addSlice(ImporterContext* ctx, nvinfer1::ITensor& data, c
 {
     constexpr int32_t minDim = std::numeric_limits<int32_t>::min();
     constexpr int32_t maxDim = std::numeric_limits<int32_t>::max();
-    nvinfer1::ISliceLayer* slice = N_CHECK(ctx->network()->addSlice(data, toDims(starts, "slice start", 0, maxDim),
-        toDims(sizes, "slice size", 0, maxDim), toDims(strides, "slide strides", minDim, maxDim)));
+    nvinfer1::ISliceLayer* slice = N_CHECK(ctx->network()->addSlice(data,
+        shapeTensorToDims(starts, "slice start", 0, maxDim), shapeTensorToDims(sizes, "slice size", 0, maxDim),
+        shapeTensorToDims(strides, "slide strides", minDim, maxDim)));
     setShapeInputIfDynamic(ctx, slice, 1, starts);
     setShapeInputIfDynamic(ctx, slice, 2, sizes);
     setShapeInputIfDynamic(ctx, slice, 3, strides);
@@ -551,8 +553,9 @@ nvinfer1::ISliceLayer* addSlice(ImporterContext* ctx, nvinfer1::ITensor& data, c
 
 nvinfer1::IFillLayer* addFill(ImporterContext* ctx, const ShapeTensor& shape, nvinfer1::FillOperation op)
 {
-    nvinfer1::IFillLayer* fill = N_CHECK(ctx->network()->addFill(
-        toDims(shape, "fill output", 0, std::numeric_limits<int32_t>::max()), op, nvinfer1::DataType::kFLOAT));
+    nvinfer1::IFillLayer* fill = N_CHECK(
+        ctx->network()->addFill(shapeTensorToDims(shape, "fill output", 0, std::numeric_limits<int32_t>::max()), op,
+            nvinfer1::DataType::kFLOAT));
     setShapeInputIfDynamic(ctx, fill, 0, shape);
     ctx->registerLayer(fill, "ONNXTRT_ShapeFill", nullptr);
     return fill;

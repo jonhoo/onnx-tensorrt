@@ -184,7 +184,7 @@ TensorRT supports the following ONNX data types: DOUBLE, FLOAT32, FLOAT16, BFLOA
 | Sin                       | Y          | FP32, FP16, BF16 |
 | Sinh                      | Y          | FP32, FP16, BF16 |
 | Size                      | Y          | FP32, FP16, BF16, INT32, INT64, BOOL |
-| Slice                     | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | `axes` must be an initializer                                                                                                            |
+| Slice                     | Y          | FP32, FP16, BF16, INT32, INT64, BOOL | 
 | Softmax                   | Y          | FP32, FP16, BF16 |
 | SoftmaxCrossEntropyLoss   | N          |
 | Softplus                  | Y          | FP32, FP16, BF16 |
