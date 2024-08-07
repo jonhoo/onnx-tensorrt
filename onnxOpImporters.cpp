@@ -5163,7 +5163,7 @@ NodeImportResult scatterPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
 {
     // Populate scatter plugin properties.
     std::string const pluginName = "ScatterElements";
-    std::string const pluginVersion = "1";
+    std::string const pluginVersion = "2";
     std::vector<nvinfer1::PluginField> f;
 
     // populate fields axis, reduction type
@@ -5173,7 +5173,7 @@ NodeImportResult scatterPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
 
     // Create plugin from registry
     auto const plugin = createPlugin(getNodeName(node),
-        static_cast<nvinfer1::IPluginCreator*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
+        static_cast<nvinfer1::IPluginCreatorV3One*>(importPluginCreator(ctx, pluginName, pluginVersion)), f);
 
     ASSERT_NODE(plugin != nullptr, "ScatterReduction plugin was not found in the plugin registry!", node, nodeIdx,
         ErrorCode::kUNSUPPORTED_NODE);
@@ -5185,7 +5185,7 @@ NodeImportResult scatterPluginHelper(ImporterContext* ctx, ::ONNX_NAMESPACE::Nod
         pluginInputs.emplace_back(&convertToTensor(input, ctx));
     }
 
-    auto* layer = N_CHECK(ctx->network()->addPluginV2(pluginInputs.data(), pluginInputs.size(), *plugin));
+    auto* layer = N_CHECK(ctx->network()->addPluginV3(pluginInputs.data(), pluginInputs.size(), nullptr, 0, *plugin));
     ctx->registerLayer(layer, node);
     RETURN_FIRST_OUTPUT(layer, node, nodeIdx);
 }
@@ -5323,9 +5323,6 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
         ends = ShapeTensor{*input2};
         // "If axes are omitted, they are set to [0, ..., ndim-1]."
         axes = nbInputs > 3 ? ShapeTensor(ctx, inputs.at(3)) : iotaShapeVector(dims.size());
-        // Doesn't support dynamic axes currently.
-        ASSERT_NODE((axes.allValuesKnown()), "This version of TensorRT does not support dynamic axes.", node, nodeIdx,
-            ErrorCode::kUNSUPPORTED_NODE);
         ASSERT_NODE((starts.size() == axes.size()),
             "The shape of input starts misaligns with the shape of input axes. Shape of input starts = "
                 << starts.size() << ", shape of input axes = " << axes.size() << ".",
@@ -5348,58 +5345,52 @@ DEFINE_BUILTIN_OP_IMPORTER(Slice)
         steps = similar(ctx, starts, 1);
     }
 
-    // Decode axes.
-    // Also inspect whether axes form an "iota" sequence 0, 1, 2, ....
-    bool isIota = true;
-    int32_t j = 0;
-    std::vector<int64_t> newAxes;
-    newAxes.reserve(axes.size());
-
-    for (int64_t axis : axes)
+    if (axes.allValuesKnown())
     {
-        // "Accepted range is [-r, r-1] where r = rank(data)."
-        int32_t const r = dims.size();
-        ASSERT_NODE((-r <= axis && axis < r),
-            "The range of axis must be in [-r, r-1], where r is the rank of input data. Provided axis = "
-                << axis << ", r = " << r << ".",
-            node, nodeIdx, ErrorCode::kINVALID_VALUE);
-        // "Negative value means counting dimensions from the back."
-        if (axis < 0)
+        // gather() requires indices to be normalized if their values are known
+        std::vector<int64_t> newAxes;
+        newAxes.reserve(axes.size());
+        for (int64_t axis : axes)
         {
-            axis += r;
+            // "Accepted range is [-r, r-1] where r = rank(data)."
+            int32_t const r = dims.size();
+            ASSERT_NODE((-r <= axis && axis < r),
+                "The range of axis must be in [-r, r-1], where r is the rank of input data. Provided axis = "
+                    << axis << ", r = " << r << ".",
+                node, nodeIdx, ErrorCode::kINVALID_VALUE);
+            // "Negative value means counting dimensions from the back."
+            if (axis < 0)
+            {
+                axis += r;
+            }
+            newAxes.push_back(axis);
         }
-        newAxes.push_back(axis);
-        isIota &= axis == j;
-        ++j;
+        axes = ShapeTensor(1, std::move(newAxes));
     }
-    axes = ShapeTensor(1, std::move(newAxes));
-
-    // Check for duplicate axes.
-    ASSERT_NODE((std::unordered_set<int64_t>(axes.begin(), axes.end()).size() == static_cast<size_t>(axes.size())),
-        "No duplicated axes are allowed.", node, nodeIdx, ErrorCode::kINVALID_NODE);
-
-    if (axes.size() < dims.size() || !isIota)
-    {
-        // Axes specify a subset of the dimensions, or out of order.
-        // Convert starts/ends/steps to complete in-order form.
-        ShapeTensor const subscripts{axesToInterlaceSubscripts(axes, dims.size())};
-        starts = interlace(ctx, similar(ctx, dims, 0), starts, subscripts);
-        ends = interlace(ctx, dims, ends, subscripts);
-        steps = interlace(ctx, similar(ctx, dims, 1), steps, subscripts);
-    }
+    // Get dimensions of dims that correspond to axes for the computation of sizes
+    auto const axesDims = gather(ctx, dims, axes);
 
     // ONNX has a bunch of rules for converting out of bounds starts/ends
     // indices into the actual indices to use.
-    decodeOnnxStartsAndEnds(ctx, dims, steps, starts, ends);
+    decodeOnnxStartsAndEnds(ctx, axesDims, steps, starts, ends);
 
     // TensorRT uses sizes of the output dimensions instead of ends.
-    ShapeTensor sizes = computeSliceSizes(ctx, starts, ends, steps, dims);
+    ShapeTensor sizes = computeSliceSizes(ctx, starts, ends, steps, axesDims);
 
     // Negative sizes signifies an empty slice, so clamp sizes to 0
-    ShapeTensor const zeros = similar(ctx, dims, 0);
+    ShapeTensor const zeros = similar(ctx, axesDims, 0);
     sizes = max(ctx, zeros, sizes);
 
     nvinfer1::ISliceLayer* slice = addSlice(ctx, data, starts, sizes, steps);
+    if (axes.allValuesKnown())
+    {
+        auto const nbDims = data.getDimensions().nbDims;
+        slice->setAxes(shapeTensorToDims(axes, "slice axes", -nbDims, nbDims - 1));
+    }
+    else
+    {
+        slice->setInput(5, convertToTensor(inputs.at(3), ctx));
+    }
 
     ctx->registerLayer(slice, node);
 

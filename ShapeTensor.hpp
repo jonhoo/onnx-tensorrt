@@ -234,6 +234,9 @@ ShapeTensor convertTo1D(ImporterContext* ctx, const ShapeTensor& tensor);
 //! Reshape single value 1D tensor to a 0D tensor.
 ShapeTensor convertTo0D(ImporterContext* ctx, const ShapeTensor& tensor);
 
+//! Convert ShapeTensor to Dims, with bounds checking.
+nvinfer1::Dims shapeTensorToDims(const ShapeTensor& x, const char* what, int32_t minAllowed, int32_t maxAllowed);
+
 //! Add an ISliceLayer.
 nvinfer1::ISliceLayer* addSlice(ImporterContext* ctx, nvinfer1::ITensor& data, const ShapeTensor& starts,
     const ShapeTensor& sizes, const ShapeTensor& strides);
