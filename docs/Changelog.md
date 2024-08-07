@@ -2,7 +2,13 @@
 
 # ONNX-TensorRT Changelog
 
-# TensorRT 10.2 GA Release - 2024-7-10
+# TensorRT 10.3 GA Release - 2024-8-7
+For more details, see the 10.3 GA release notes.
+
+- Added support for tensor `axes` inputs for `Slice` nodes
+- Updated `ScatterElements` importer to use an updated plugin
+
+# TensorRT 10.2 GA Release - 2024-7-10 
 For more details, see the 10.2 GA release notes.
 
 - Improved error handling with new macros and classes
